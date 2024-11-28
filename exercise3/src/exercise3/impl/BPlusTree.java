@@ -1,6 +1,10 @@
 package exercise3.impl;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+// Order 8 | m = 8
 
 public class BPlusTree<K extends Comparable<? super K>, V> {
     static final int ENTRY_COUNT = 8;
@@ -42,7 +46,7 @@ public class BPlusTree<K extends Comparable<? super K>, V> {
 
     final class IndexNode extends Node {
         final List<K> keys = new ArrayList<>(ENTRY_COUNT);
-        final List<Node> children = new ArrayList<>(ENTRY_COUNT + 1);
+        final List<Node> children = new ArrayList<>(ENTRY_COUNT - 1);
 
         boolean isLeaf() {
             return false;
@@ -51,7 +55,19 @@ public class BPlusTree<K extends Comparable<? super K>, V> {
         @Override
         Node split() {
             // TODO: Impl.
-            return null;
+            int middle = ENTRY_COUNT / 2;
+
+            IndexNode newIndex = new IndexNode();
+
+            newIndex.keys.addAll(keys.subList(middle + 1, keys.size()));
+
+            newIndex.children.addAll(children.subList(middle + 1, children.size()));
+
+            keys.subList(middle + 1, keys.size()).clear();
+
+            children.subList(middle + 1, children.size()).clear();
+
+            return newIndex;
         }
     }
 
@@ -62,7 +78,18 @@ public class BPlusTree<K extends Comparable<? super K>, V> {
         @Override
         Node split() {
             // TODO: Impl.
-            return null;
+            int middle = ENTRY_COUNT / 2;
+
+            LeafNode newLeaf = new LeafNode();
+
+            newLeaf.records.addAll(records.subList(middle, records.size()));
+
+            records.subList(middle, records.size()).clear();
+
+            newLeaf.next = this.next;
+            this.next = newLeaf;
+
+            return newLeaf;
         }
 
         @Override
@@ -75,21 +102,153 @@ public class BPlusTree<K extends Comparable<? super K>, V> {
 
     public BPlusTree() {
         // TODO: Impl.
+        this.root = new LeafNode();
+    }
+
+    private IndexNode findIndexNode(Node current, IndexNode target) {
+        if (current.isLeaf()) {
+            return null;
+        }
+
+        IndexNode indexNode = (IndexNode) current;
+
+        if (indexNode == target) {
+            return indexNode;
+        }
+
+        for (Node child : indexNode.children) {
+            IndexNode result = findIndexNode(child, target);
+            if (result != null) {
+                return result;
+            }
+        }
+
+        return null;
     }
 
     public V insert(K key, V value) {
         // TODO: Impl.
+
+        Record temp = new Record(key);
+        temp.setValue(value);
+
+        if (root.isLeaf()) {
+            if (((LeafNode) root).records.size() > ENTRY_COUNT - 1) {
+                LeafNode newLeaf = (LeafNode) root.split();
+                IndexNode newIndex = new IndexNode();
+                newIndex.keys.add(newLeaf.records.get(0).key);
+                newIndex.children.add(root);
+                newIndex.children.add(newLeaf);
+                root = newIndex;
+            }
+
+            LeafNode leaf = (LeafNode) findLeaf(key);
+            if (leaf != null) {
+                insertIntoLeaf(leaf, temp);
+            }
+        } else {
+            if (((IndexNode) root).keys.size() > ENTRY_COUNT - 1) {
+                IndexNode newIndex = (IndexNode) root.split();
+                IndexNode index = new IndexNode();
+                index.keys.add(newIndex.keys.get(0));
+                index.children.add(root);
+                index.children.add(newIndex);
+                root = index;
+            }
+
+            IndexNode newIndex = (IndexNode) findIndexNode(root, (IndexNode) root);
+            if (newIndex != null) {
+                insertIntoIndexNode(newIndex, temp);
+            }
+        }
+
         return null;
+    }
+
+    private void insertIntoIndexNode(IndexNode newIndex, Record record) {
+        int i = 0;
+        while (i < newIndex.keys.size() && newIndex.keys.get(i).compareTo(record.getKey()) < 0) {
+            i++;
+        }
+        Node child = newIndex.children.get(i);
+        if (child.isLeaf()) {
+            LeafNode leaf = (LeafNode) child;
+            insertIntoLeaf(leaf, record);
+        } else {
+            insertIntoIndexNode((IndexNode) child, record);
+        }
+    }
+
+    private void insertIntoLeaf(LeafNode leaf, Record record) {
+        int i = 0;
+        while (i < leaf.records.size() && leaf.records.get(i).getKey().compareTo(record.getKey()) < 0) {
+            i++;
+        }
+        leaf.records.add(i, record);
+    }
+
+    private Node findLeaf(K key) {
+        if (root == null) {
+            return null;
+        }
+        Node node = root;
+        while (!node.isLeaf()) {
+            IndexNode indexNode = (IndexNode) node;
+            int i = 0;
+            while (i < indexNode.keys.size() && key.compareTo(indexNode.keys.get(i)) > 0) {
+                i++;
+            }
+            node = indexNode.children.get(i);
+        }
+        return node;
     }
 
     public V pointQuery(K key) {
         // TODO: Impl.
+        Node node = (LeafNode) findLeaf(key);
+
+        if (root == null || node == null) {
+            return null;
+        }
+
+        if (node.isLeaf()) {
+            LeafNode leaf = (LeafNode) node;
+
+            for (Record record : leaf.records) {
+                if (record.key.equals(key)) {
+                    return record.value;
+                }
+            }
+        }
+
         return null;
     }
 
     public List<? extends Map.Entry<K, V>> rangeQuery(K minKey, K maxKey) {
         // TODO: Impl.
-        return List.of();
+        List<Map.Entry<K, V>> result = new ArrayList<>();
+
+        Node node = findLeaf(minKey);
+
+        if (root == null || node == null) {
+            return List.of();
+        }
+
+        while (node != null && node.isLeaf()) {
+            LeafNode leaf = (LeafNode) node;
+
+            for (Record record : leaf.records) {
+                if (record.key.compareTo(minKey) >= 0 && record.key.compareTo(maxKey) <= 0) {
+                    result.add(record);
+                } else if (record.key.compareTo(maxKey) > 0) {
+                    return result;
+                }
+            }
+
+            node = leaf.next;
+        }
+
+        return result;
     }
 
     public static void main(String[] args) {
