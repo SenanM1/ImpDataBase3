@@ -50,8 +50,7 @@ public class PaxPage<T> implements Page<T> {
         this.converter = converter;
         // Calculate the maximum number of records we can store
         int numRecords = (size / converter.getSerializedSize());
-        if (numRecords * converter.getSerializedSize() + numRecords > size)
-            numRecords--;
+        if (numRecords * converter.getSerializedSize() + numRecords > size) numRecords--;
         // All slots empty initially
         this.slotMask = new boolean[numRecords];
         Arrays.fill(slotMask, false);
@@ -118,16 +117,40 @@ public class PaxPage<T> implements Page<T> {
      */
     @Override
     public short store(T element) {
-        // TODO
-        return 0;
+        short id = nextFreeId();
+        int recordSize = getRecordSize();
+        byte[] serialized = new byte[recordSize];
+
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream(recordSize); DataOutputStream dos = new DataOutputStream(baos)) {
+            for (int col = 0; col < columnSizes.length; col++) {
+                converter.writeColumn(dos, element, col);
+            }
+            System.arraycopy(baos.toByteArray(), 0, serialized, 0, recordSize);
+        } catch (IOException e) {
+            throw new RuntimeException("Error serializing record", e);
+        }
+        int offset = 0;
+        for (int col = 0; col < columnSizes.length; col++) {
+            int colOffset = minipageOffsets[col] + id * columnSizes[col];
+            System.arraycopy(serialized, offset, data.array, colOffset, columnSizes[col]);
+            offset += columnSizes[col];
+        }
+
+        slotMask[id] = true;
+        sizeRemaining -= getRecordSize();
+        return id;
     }
+
 
     /**
      * {@inheritDoc}
      */
     @Override
     public void delete(short id) {
-        // TODO
+        if (!slotMask[id]) throw new IllegalArgumentException("Slot is already empty.");
+
+        slotMask[id] = false;
+        sizeRemaining += getRecordSize();
     }
 
     /**
@@ -135,9 +158,28 @@ public class PaxPage<T> implements Page<T> {
      */
     @Override
     public T get(short id) {
-        // TODO
-        return null;
+        if (!slotMask[id]) throw new IllegalArgumentException("Invalid record ID.");
+
+        byte[] serialized = new byte[getRecordSize()];
+        int offset = 0;
+
+        for (int col = 0; col < columnSizes.length; col++) {
+            int colOffset = minipageOffsets[col] + id * columnSizes[col];
+            System.arraycopy(data.array, colOffset, serialized, offset, columnSizes[col]);
+            offset += columnSizes[col];
+        }
+
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized); DataInputStream dis = new DataInputStream(bais)) {
+            T result = null;
+            for (int col = 0; col < columnSizes.length; col++) {
+                result = converter.readColumn(dis, result, col);
+            }
+            return result;
+        } catch (IOException e) {
+            throw new RuntimeException("Error deserializing record", e);
+        }
     }
+
 
     /**
      * Retrieves the next free slot to use (First Fit)
@@ -146,8 +188,7 @@ public class PaxPage<T> implements Page<T> {
      */
     private short nextFreeId() {
         for (short id = 0; id < slotMask.length; id++) {
-            if (!slotMask[id])
-                return id;
+            if (!slotMask[id]) return id;
         }
         throw new RuntimeException("No free ids available");
     }
@@ -162,8 +203,7 @@ public class PaxPage<T> implements Page<T> {
             short next = computeNext();
 
             short computeNext() {
-                while (idx < slotMask.length && !slotMask[idx])
-                    idx++;
+                while (idx < slotMask.length && !slotMask[idx]) idx++;
                 return idx++;
             }
 
